@@ -2,10 +2,17 @@ const router = require('express').Router();
 const passport = require('../config/passport');
 const jwt = require('jsonwebtoken');
 
-const { register, login } = require('../controllers/authController');
+const {
+  register,
+  login,
+  getMe,
+} = require('../controllers/authController');
+
+const auth = require('../middleware/auth');
 
 router.post('/register', register);
 router.post('/login', login);
+router.get('/me', auth, getMe);
 
 // Google Sign-In
 router.get(
@@ -19,18 +26,18 @@ router.get(
 router.get(
   '/google/callback',
   passport.authenticate('google', {
-    failureRedirect: 'http://localhost:5173/login',
+    failureRedirect: `${process.env.CLIENT_URL}/login`,
     session: false,
   }),
   (req, res) => {
     const token = jwt.sign(
       {
-        id: req.user.googleId,
-        email: req.user.email,
-        username: req.user.username,
+        id: req.user._id,
       },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      {
+        expiresIn: '7d',
+      }
     );
 
     res.redirect(

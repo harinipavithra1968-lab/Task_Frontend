@@ -27,3 +27,33 @@ exports.login = asyncHandler(async (req, res) => {
   }
   res.json(respond(user));
 });
+// GET /api/auth/google/success
+exports.googleSuccess = asyncHandler(async (req, res) => {
+  if (!req.user) {
+    res.status(401);
+    throw new Error('Google authentication failed');
+  }
+
+  const user = req.user;
+
+  res.json(respond(user));
+});
+// GET /api/auth/me
+exports.getMe = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.userId).select(
+    'username email profileImage authProvider'
+  );
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  res.json({
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    profileImage: user.profileImage || '',
+    authProvider: user.authProvider || 'local',
+  });
+});
