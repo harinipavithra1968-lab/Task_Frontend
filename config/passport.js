@@ -1,6 +1,6 @@
-const passport = require('passport');
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('../models/User');
+const passport = require("passport");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const User = require("../models/User");
 
 passport.use(
   new GoogleStrategy(
@@ -15,10 +15,25 @@ passport.use(
         const email = profile.emails?.[0]?.value?.toLowerCase();
 
         if (!email) {
-          return done(new Error('Google email not available'));
+          return done(new Error("Google email not available"));
         }
 
-        // Find existing user
+        // -----------------------------------
+        // CREATE A SAFE USERNAME
+        // -----------------------------------
+        let username =
+          email
+            .split("@")[0]
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "") || "googleuser";
+
+        if (username.length < 3) {
+          username = `user${Date.now()}`;
+        }
+
+        // -----------------------------------
+        // FIND EXISTING USER
+        // -----------------------------------
         let user = await User.findOne({
           $or: [
             { googleId: profile.id },
@@ -26,65 +41,93 @@ passport.use(
           ],
         });
 
-        // Existing user
+        // -----------------------------------
+        // EXISTING USER
+        // -----------------------------------
         if (user) {
+          // If old account doesn't have username,
+          // create one now.
+          if (!user.username || user.username.trim() === "") {
+            let newUsername = username;
+
+            let usernameExists = await User.findOne({
+              username: newUsername,
+              _id: { $ne: user._id },
+            });
+
+            if (usernameExists) {
+              newUsername = `${username}${Date.now()
+                .toString()
+                .slice(-5)}`;
+            }
+
+            user.username = newUsername;
+          }
+
           user.googleId = profile.id;
+
           user.profileImage =
-            profile.photos?.[0]?.value || user.profileImage || '';
-          user.authProvider = 'google';
+            profile.photos?.[0]?.value ||
+            user.profileImage ||
+            "";
+
+          user.authProvider = "google";
 
           await user.save();
+
+          console.log("Existing Google user logged in:", {
+            id: user._id,
+            username: user.username,
+            email: user.email,
+          });
 
           return done(null, user);
         }
 
-        // Create username from Google email
-        let username = email
-          .split('@')[0]
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '');
+        // -----------------------------------
+        // MAKE SURE USERNAME IS UNIQUE
+        // -----------------------------------
+        let uniqueUsername = username;
 
-        if (username.length < 3) {
-          username = `user${Date.now()}`;
-        }
-
-        // Make username unique
-        let usernameExists = await User.findOne({ username });
+        let usernameExists = await User.findOne({
+          username: uniqueUsername,
+        });
 
         if (usernameExists) {
-          username = `${username}${Date.now()
+          uniqueUsername = `${username}${Date.now()
             .toString()
             .slice(-5)}`;
         }
 
-        console.log('Creating Google user:', {
-          username,
-          email,
-          googleId: profile.id,
-        });
-
-        // Create user
+        // -----------------------------------
+        // CREATE NEW GOOGLE USER
+        // -----------------------------------
         user = new User({
-          username: username,
+          username: uniqueUsername,
           email: email,
           googleId: profile.id,
           profileImage:
-            profile.photos?.[0]?.value || '',
-          authProvider: 'google',
+            profile.photos?.[0]?.value || "",
+          authProvider: "google",
+        });
+
+        console.log("NEW GOOGLE USER:", {
+          username: user.username,
+          email: user.email,
+          googleId: user.googleId,
+          authProvider: user.authProvider,
         });
 
         await user.save();
 
-        console.log('Google user created:', user._id);
+        console.log("New Google user created:", {
+          id: user._id,
+          username: user.username,
+        });
 
         return done(null, user);
-
       } catch (error) {
-        console.error(
-          'Google authentication error:',
-          error
-        );
-
+        console.error("Google authentication error:", error);
         return done(error, null);
       }
     }
