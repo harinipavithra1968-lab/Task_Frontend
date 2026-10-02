@@ -5,8 +5,9 @@ const userSchema = new mongoose.Schema(
   {
     username: {
       type: String,
-      required: [true, "Username is required"],
+      required: false,
       unique: true,
+      sparse: true,
       trim: true,
       lowercase: true,
       minlength: [3, "Username must be at least 3 characters"],
@@ -48,51 +49,16 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-
-// Create username automatically before validation
-userSchema.pre("validate", async function () {
-  if (!this.username && this.email) {
-    let username = this.email
-      .split("@")[0]
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-
-    if (username.length < 3) {
-      username = "user";
-    }
-
-    let finalUsername = username;
-
-    const existingUser = await mongoose.models.User.findOne({
-      username: finalUsername,
-      _id: { $ne: this._id },
-    });
-
-    if (existingUser) {
-      finalUsername = `${username}${Date.now()
-        .toString()
-        .slice(-6)}`;
-    }
-
-    this.username = finalUsername;
-  }
-});
-
-
-// Hash password only when password exists and changes
 userSchema.pre("save", async function () {
   if (this.isModified("password") && this.password) {
     this.password = await bcrypt.hash(this.password, 10);
   }
 });
 
-
-// Compare password
 userSchema.methods.matchPassword = function (plain) {
   if (!this.password) return false;
 
   return bcrypt.compare(plain, this.password);
 };
-
 
 module.exports = mongoose.model("User", userSchema);
