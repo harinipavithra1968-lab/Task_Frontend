@@ -1,49 +1,130 @@
-const router = require('express').Router();
-const passport = require('../config/passport');
-const jwt = require('jsonwebtoken');
+import { createContext, useContext, useEffect, useState } from "react";
+import { api } from "../api";
 
-const {
-  register,
-  login,
-  getMe,
-} = require('../controllers/authController');
+const AuthContext = createContext(null);
 
-const auth = require('../middleware/auth');
+export const useAuth = () => useContext(AuthContext);
 
-router.post('/register', register);
-router.post('/login', login);
-router.get('/me', auth, getMe);
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(() =>
+    JSON.parse(localStorage.getItem("user") || "null")
+  );
 
-// Google Sign-In
-router.get(
-  '/google',
-  passport.authenticate('google', {
-    scope: ['profile', 'email'],
-  })
-);
+  const save = ({ token, user }) => {
+    localStorage.setItem("token", token);
+    localStorage.setItem("user", JSON.stringify(user));
+    setUser(user);
+  };
 
-// Google callback
-router.get(
-  '/google/callback',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.CLIENT_URL}/login`,
-    session: false,
-  }),
-  (req, res) => {
-    const token = jwt.sign(
-      {
-        id: req.user._id,
+  const login = async (identifier, password) => {
+    const data = await api("/auth/login", {
+      method: "POST",
+      body: {
+        identifier,
+        password,
       },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: '7d',
+    });
+
+    save(data);
+  };
+
+  const register = async (form) => {
+    const data = await api("/auth/register", {
+      method: "POST",
+      body: form,
+    });
+
+    save(data);
+  };
+
+  // ==========================================
+  // GOOGLE LOGIN
+  // ==========================================
+
+  useEffect(() => {
+    const handleGoogleLogin = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get("token");
+
+      if (!token) {
+        return;
       }
-    );
 
-    res.redirect(
-      `${process.env.CLIENT_URL}/?token=${token}`
-    );
-  }
-);
+      try {
+        console.log("Google token received");
 
-module.exports = router;
+        // Save Google JWT
+        localStorage.setItem("token", token);
+
+        // Get user from YOUR actual backend
+        const response = await fetch(
+          "https://task-frontend-gyqw.onrender.com/api/auth/me",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Unable to get Google user information");
+        }
+
+        const data = await response.json();
+
+        console.log("Google user received:", data);
+
+        // Handle either { user: {...} } or direct user object
+        const googleUser = data.user || data;
+
+        localStorage.setItem(
+          "user",
+          JSON.stringify(googleUser)
+        );
+
+        setUser(googleUser);
+
+        // Remove ?token= from browser URL
+        window.history.replaceState(
+          {},
+          document.title,
+          "/"
+        );
+
+        // Go to Task Management page
+        window.location.href = "/";
+      } catch (error) {
+        console.error("Google login error:", error);
+
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        // Send user back to login
+        window.location.href = "/login";
+      }
+    };
+
+    handleGoogleLogin();
+  }, []);
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    setUser(null);
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        login,
+        register,
+        logout,
+        setUser,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
