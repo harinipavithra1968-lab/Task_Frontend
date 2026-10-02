@@ -7,6 +7,11 @@ const { notFound, errorHandler } = require('./middleware/error');
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL }));
 app.use(express.json());
+app.get("/", (req, res) => {
+  res.json({
+    message: "TaskDesk backend is running"
+  });
+});
 
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/tasks', require('./routes/taskRoutes'));
