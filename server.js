@@ -41,6 +41,7 @@ app.use(
 /* ---------------- MIDDLEWARE ---------------- */
 
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
 
 // Initialize Passport
 app.use(passport.initialize());
