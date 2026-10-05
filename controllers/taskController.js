@@ -20,7 +20,7 @@ const formatTask = (task, req) => {
   const obj = task.toObject();
 
   obj.imageUrl = obj.hasImage
-    ? `${req.protocol}://${req.get('host')}/api/tasks/${task._id}/image`
+    ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`
     : null;
 
   delete obj.hasImage;
@@ -83,9 +83,8 @@ exports.createTask = asyncHandler(async (req, res) => {
   const result = task.toObject();
 
   result.imageUrl = req.file
-    ? `${req.protocol}://${req.get('host')}/api/tasks/${task._id}/image`
-    : null;
-
+  ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`:
+   null;
   delete result.imageData;
   delete result.imageContentType;
 
@@ -126,9 +125,9 @@ exports.updateTask = asyncHandler(async (req, res) => {
 
   const result = task.toObject();
 
-  result.imageUrl = imageCheck?.imageData
-    ? `${req.protocol}://${req.get('host')}/api/tasks/${task._id}/image`
-    : null;
+ result.imageUrl = imageCheck?.imageData
+  ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`:
+   null;
 
   delete result.imageData;
   delete result.imageContentType;

@@ -11,6 +11,7 @@ const { notFound, errorHandler } = require("./middleware/error");
 require("./config/passport");
 
 const app = express();
+app.set('trust proxy', 1);
 
 /* ---------------- CORS ---------------- */
 
