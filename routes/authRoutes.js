@@ -1,6 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const passport = require("passport");
 
 const User = require("../models/User");
 
@@ -40,9 +41,14 @@ const protect = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
 
-    const user = await User.findById(decoded.id).select("-password");
+    const user = await User.findById(decoded.id).select(
+      "-password"
+    );
 
     if (!user) {
       return res.status(401).json({
@@ -54,6 +60,8 @@ const protect = async (req, res, next) => {
 
     next();
   } catch (error) {
+    console.error("Authentication error:", error);
+
     return res.status(401).json({
       message: "Invalid or expired token.",
     });
@@ -69,31 +77,31 @@ router.post("/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
-    // Check required fields
     if (!username || !email || !password) {
       return res.status(400).json({
-        message: "Username, email and password are required.",
+        message:
+          "Username, email and password are required.",
       });
     }
 
-    // Validate username
-    if (username.trim().length < 3) {
-      return res.status(400).json({
-        message: "Username must be at least 3 characters.",
-      });
-    }
-
-    // Validate password
-    if (password.length < 6) {
-      return res.status(400).json({
-        message: "Password must be at least 6 characters.",
-      });
-    }
-
-    const cleanUsername = username.trim();
+    const cleanUsername = username.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
 
-    // Check existing email
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({
+        message:
+          "Username must be at least 3 characters.",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message:
+          "Password must be at least 6 characters.",
+      });
+    }
+
+    // Check email
     const existingEmail = await User.findOne({
       email: cleanEmail,
     });
@@ -104,9 +112,9 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Check existing username
+    // Check username
     const existingUsername = await User.findOne({
-      username: cleanUsername.toLowerCase(),
+      username: cleanUsername,
     });
 
     if (existingUsername) {
@@ -116,20 +124,22 @@ router.post("/register", async (req, res) => {
     }
 
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(
+      password,
+      10
+    );
 
     // Create user
     const user = await User.create({
-      username: cleanUsername.toLowerCase(),
+      username: cleanUsername,
       email: cleanEmail,
       password: hashedPassword,
       authProvider: "local",
     });
 
-    // Create JWT
+    // Create token
     const token = createToken(user);
 
-    // Send response
     res.status(201).json({
       message: "Account created successfully.",
       token,
@@ -161,13 +171,15 @@ router.post("/login", async (req, res) => {
 
     if (!identifier || !password) {
       return res.status(400).json({
-        message: "Email/username and password are required.",
+        message:
+          "Email/username and password are required.",
       });
     }
 
-    const cleanIdentifier = identifier.trim().toLowerCase();
+    const cleanIdentifier =
+      identifier.trim().toLowerCase();
 
-    // Allow login using either email OR username
+    // Login using email OR username
     const user = await User.findOne({
       $or: [
         {
@@ -181,7 +193,8 @@ router.post("/login", async (req, res) => {
 
     if (!user) {
       return res.status(401).json({
-        message: "Invalid username/email or password.",
+        message:
+          "Invalid username/email or password.",
       });
     }
 
@@ -193,7 +206,7 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Check password
+    // Compare password
     const passwordMatch = await bcrypt.compare(
       password,
       user.password
@@ -201,11 +214,11 @@ router.post("/login", async (req, res) => {
 
     if (!passwordMatch) {
       return res.status(401).json({
-        message: "Invalid username/email or password.",
+        message:
+          "Invalid username/email or password.",
       });
     }
 
-    // Create JWT
     const token = createToken(user);
 
     res.json({
@@ -229,7 +242,7 @@ router.post("/login", async (req, res) => {
 });
 
 // ======================================================
-// GET CURRENT USER
+// CURRENT USER
 // GET /api/auth/me
 // ======================================================
 
@@ -241,16 +254,89 @@ router.get("/me", protect, async (req, res) => {
         username: req.user.username,
         email: req.user.email,
         profileImage: req.user.profileImage || "",
-        authProvider: req.user.authProvider || "local",
+        authProvider:
+          req.user.authProvider || "local",
       },
     });
   } catch (error) {
-    console.error("Get current user error:", error);
+    console.error(
+      "Get current user error:",
+      error
+    );
 
     res.status(500).json({
-      message: "Unable to get user information.",
+      message:
+        "Unable to get user information.",
     });
   }
 });
+
+// ======================================================
+// GOOGLE LOGIN
+// GET /api/auth/google
+// ======================================================
+
+router.get(
+  "/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+  })
+);
+
+// ======================================================
+// GOOGLE CALLBACK
+// GET /api/auth/google/callback
+// ======================================================
+
+router.get(
+  "/google/callback",
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: `${
+      process.env.CLIENT_URL
+    }/login`,
+  }),
+  async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.redirect(
+          `${process.env.CLIENT_URL}/login`
+        );
+      }
+
+      // Create JWT for Google user
+      const token = createToken(req.user);
+
+      // Send token to frontend
+      return res.redirect(
+        `${process.env.CLIENT_URL}/?token=${token}`
+      );
+    } catch (error) {
+      console.error(
+        "Google callback error:",
+        error
+      );
+
+      return res.redirect(
+        `${process.env.CLIENT_URL}/login`
+      );
+    }
+  }
+);
+
+// ======================================================
+// LOGOUT
+// ======================================================
+
+router.post("/logout", (req, res) => {
+  res.json({
+    message: "Logged out successfully.",
+  });
+});
+
+// ======================================================
+// EXPORT ROUTER
+// ======================================================
 
 module.exports = router;
