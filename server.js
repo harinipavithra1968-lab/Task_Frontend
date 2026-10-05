@@ -2,9 +2,13 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const passport = require("passport");
 
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/error");
+
+// Load Google Passport strategy
+require("./config/passport");
 
 const app = express();
 
@@ -20,7 +24,6 @@ app.use(
   cors({
     origin: function (origin, callback) {
       // Allow requests without an origin
-      // such as Postman or server-to-server requests
       if (!origin) {
         return callback(null, true);
       }
@@ -38,6 +41,9 @@ app.use(
 /* ---------------- MIDDLEWARE ---------------- */
 
 app.use(express.json());
+
+// Initialize Passport
+app.use(passport.initialize());
 
 /* ---------------- TEST ROUTE ---------------- */
 
