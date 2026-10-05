@@ -2,6 +2,18 @@ const Task = require('../models/Task');
 
 const { asyncHandler } = require('../middleware/error');
 
+// Build the correct backend URL.
+// This works both locally and on Render.
+const getBaseUrl = (req) => {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+
+  const protocol = forwardedProto
+    ? forwardedProto.split(',')[0].trim()
+    : req.protocol;
+
+  return `${protocol}://${req.get('host')}`;
+};
+
 // Pick only normal task fields from request body
 const pick = (b) => {
   const out = {};
@@ -15,18 +27,6 @@ const pick = (b) => {
   return out;
 };
 
-// Add image URL to the task response
-const formatTask = (task, req) => {
-  const obj = task.toObject();
-
-  obj.imageUrl = obj.hasImage
-    ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`
-    : null;
-
-  delete obj.hasImage;
-
-  return obj;
-};
 
 // GET /api/tasks
 // GET /api/tasks?date=YYYY-MM-DD
@@ -51,12 +51,12 @@ exports.getTasks = asyncHandler(async (req, res) => {
 
     obj.hasImage = !!task.imageData;
 
-    // Do not send the actual binary image with the task list
+    // Do not send the actual binary image
     delete obj.imageData;
     delete obj.imageContentType;
 
     obj.imageUrl = obj.hasImage
-      ? `${req.protocol}://${req.get('host')}/api/tasks/${task._id}/image`
+      ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`
       : null;
 
     return obj;
@@ -65,6 +65,7 @@ exports.getTasks = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+
 // POST /api/tasks
 exports.createTask = asyncHandler(async (req, res) => {
   const taskData = {
@@ -72,7 +73,7 @@ exports.createTask = asyncHandler(async (req, res) => {
     user: req.userId,
   };
 
-  // Save image in MongoDB
+  // Save uploaded image in MongoDB
   if (req.file) {
     taskData.imageData = req.file.buffer;
     taskData.imageContentType = req.file.mimetype;
@@ -83,13 +84,15 @@ exports.createTask = asyncHandler(async (req, res) => {
   const result = task.toObject();
 
   result.imageUrl = req.file
-  ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`:
-   null;
+    ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`
+    : null;
+
   delete result.imageData;
   delete result.imageContentType;
 
   res.status(201).json(result);
 });
+
 
 // PUT /api/tasks/:id
 exports.updateTask = asyncHandler(async (req, res) => {
@@ -125,15 +128,16 @@ exports.updateTask = asyncHandler(async (req, res) => {
 
   const result = task.toObject();
 
- result.imageUrl = imageCheck?.imageData
-  ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`:
-   null;
+  result.imageUrl = imageCheck?.imageData
+    ? `${getBaseUrl(req)}/api/tasks/${task._id}/image`
+    : null;
 
   delete result.imageData;
   delete result.imageContentType;
 
   res.json(result);
 });
+
 
 // GET /api/tasks/:id/image
 exports.getTaskImage = asyncHandler(async (req, res) => {
@@ -153,10 +157,15 @@ exports.getTaskImage = asyncHandler(async (req, res) => {
   }
 
   res.set('Content-Type', task.imageContentType);
-  res.set('Cache-Control', 'public, max-age=3600');
+
+  res.set(
+    'Cache-Control',
+    'public, max-age=3600'
+  );
 
   res.send(task.imageData);
 });
+
 
 // DELETE /api/tasks/:id
 exports.deleteTask = asyncHandler(async (req, res) => {
