@@ -1,130 +1,256 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { api } from "../api";
+const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
-const AuthContext = createContext(null);
+const User = require("../models/User");
 
-export const useAuth = () => useContext(AuthContext);
+const router = express.Router();
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() =>
-    JSON.parse(localStorage.getItem("user") || "null")
+// ======================================================
+// CREATE JWT TOKEN
+// ======================================================
+
+const createToken = (user) => {
+  return jwt.sign(
+    {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: "7d",
+    }
   );
+};
 
-  const save = ({ token, user }) => {
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(user));
-    setUser(user);
-  };
+// ======================================================
+// AUTH MIDDLEWARE
+// ======================================================
 
-  const login = async (identifier, password) => {
-    const data = await api("/auth/login", {
-      method: "POST",
-      body: {
-        identifier,
-        password,
+const protect = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        message: "Not authorized. Token missing.",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.id).select("-password");
+
+    if (!user) {
+      return res.status(401).json({
+        message: "User not found.",
+      });
+    }
+
+    req.user = user;
+
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      message: "Invalid or expired token.",
+    });
+  }
+};
+
+// ======================================================
+// REGISTER
+// POST /api/auth/register
+// ======================================================
+
+router.post("/register", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    // Check required fields
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        message: "Username, email and password are required.",
+      });
+    }
+
+    // Validate username
+    if (username.trim().length < 3) {
+      return res.status(400).json({
+        message: "Username must be at least 3 characters.",
+      });
+    }
+
+    // Validate password
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters.",
+      });
+    }
+
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Check existing email
+    const existingEmail = await User.findOne({
+      email: cleanEmail,
+    });
+
+    if (existingEmail) {
+      return res.status(409).json({
+        message: "Email already registered.",
+      });
+    }
+
+    // Check existing username
+    const existingUsername = await User.findOne({
+      username: cleanUsername.toLowerCase(),
+    });
+
+    if (existingUsername) {
+      return res.status(409).json({
+        message: "Username already taken.",
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const user = await User.create({
+      username: cleanUsername.toLowerCase(),
+      email: cleanEmail,
+      password: hashedPassword,
+      authProvider: "local",
+    });
+
+    // Create JWT
+    const token = createToken(user);
+
+    // Send response
+    res.status(201).json({
+      message: "Account created successfully.",
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        profileImage: user.profileImage || "",
+        authProvider: user.authProvider || "local",
       },
     });
+  } catch (error) {
+    console.error("Register error:", error);
 
-    save(data);
-  };
+    res.status(500).json({
+      message: "Server error during registration.",
+    });
+  }
+});
 
-  const register = async (form) => {
-    const data = await api("/auth/register", {
-      method: "POST",
-      body: form,
+// ======================================================
+// LOGIN
+// POST /api/auth/login
+// ======================================================
+
+router.post("/login", async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+
+    if (!identifier || !password) {
+      return res.status(400).json({
+        message: "Email/username and password are required.",
+      });
+    }
+
+    const cleanIdentifier = identifier.trim().toLowerCase();
+
+    // Allow login using either email OR username
+    const user = await User.findOne({
+      $or: [
+        {
+          email: cleanIdentifier,
+        },
+        {
+          username: cleanIdentifier,
+        },
+      ],
     });
 
-    save(data);
-  };
+    if (!user) {
+      return res.status(401).json({
+        message: "Invalid username/email or password.",
+      });
+    }
 
-  // ==========================================
-  // GOOGLE LOGIN
-  // ==========================================
+    // Google-only account
+    if (!user.password) {
+      return res.status(401).json({
+        message:
+          "This account uses Google login. Please sign in with Google.",
+      });
+    }
 
-  useEffect(() => {
-    const handleGoogleLogin = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get("token");
+    // Check password
+    const passwordMatch = await bcrypt.compare(
+      password,
+      user.password
+    );
 
-      if (!token) {
-        return;
-      }
+    if (!passwordMatch) {
+      return res.status(401).json({
+        message: "Invalid username/email or password.",
+      });
+    }
 
-      try {
-        console.log("Google token received");
+    // Create JWT
+    const token = createToken(user);
 
-        // Save Google JWT
-        localStorage.setItem("token", token);
+    res.json({
+      message: "Login successful.",
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        profileImage: user.profileImage || "",
+        authProvider: user.authProvider || "local",
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
 
-        // Get user from YOUR actual backend
-        const response = await fetch(
-          "https://task-frontend-gyqw.onrender.com/api/auth/me",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+    res.status(500).json({
+      message: "Server error during login.",
+    });
+  }
+});
 
-        if (!response.ok) {
-          throw new Error("Unable to get Google user information");
-        }
+// ======================================================
+// GET CURRENT USER
+// GET /api/auth/me
+// ======================================================
 
-        const data = await response.json();
+router.get("/me", protect, async (req, res) => {
+  try {
+    res.json({
+      user: {
+        id: req.user._id,
+        username: req.user.username,
+        email: req.user.email,
+        profileImage: req.user.profileImage || "",
+        authProvider: req.user.authProvider || "local",
+      },
+    });
+  } catch (error) {
+    console.error("Get current user error:", error);
 
-        console.log("Google user received:", data);
+    res.status(500).json({
+      message: "Unable to get user information.",
+    });
+  }
+});
 
-        // Handle either { user: {...} } or direct user object
-        const googleUser = data.user || data;
-
-        localStorage.setItem(
-          "user",
-          JSON.stringify(googleUser)
-        );
-
-        setUser(googleUser);
-
-        // Remove ?token= from browser URL
-        window.history.replaceState(
-          {},
-          document.title,
-          "/"
-        );
-
-        // Go to Task Management page
-        window.location.href = "/";
-      } catch (error) {
-        console.error("Google login error:", error);
-
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-
-        // Send user back to login
-        window.location.href = "/login";
-      }
-    };
-
-    handleGoogleLogin();
-  }, []);
-
-  const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        login,
-        register,
-        logout,
-        setUser,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-}
+module.exports = router;
